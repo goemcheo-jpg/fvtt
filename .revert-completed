@@ -1,0 +1,8 @@
+Revert of PR #1 merge commit 3a549aafba414f5f3680c699c635c8da00714755 completed successfully.
+
+Files reverted:
+- README.md
+- module.json  
+- visual-novel-chat-1.0.0.zip
+
+This marker file will be removed after the PR is created.
