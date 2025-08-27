@@ -1,0 +1,19 @@
+<div class="vn-window {{position}}">
+    {{#if currentSpeaker}}
+    <div class="vn-speaker">
+        <span class="speaker-name">{{currentSpeaker}}</span>
+    </div>
+    {{/if}}
+    
+    <div class="vn-content">
+        {{#if messages.0}}
+        <div class="vn-text">{{messages.0.content}}</div>
+        {{else}}
+        <div class="vn-text vn-waiting">메시지를 기다리는 중...</div>
+        {{/if}}
+        
+        <div class="vn-continue">
+            <span>▼ 클릭하거나 스페이스키를 눌러 계속</span>
+        </div>
+    </div>
+</div>

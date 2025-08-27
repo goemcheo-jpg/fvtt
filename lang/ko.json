@@ -1,0 +1,12 @@
+{
+    "VN_CHAT": {
+        "TITLE": "비주얼노벨 채팅",
+        "ENABLE": "비주얼노벨 모드 활성화",
+        "POSITION": "채팅창 위치",
+        "BOTTOM": "하단",
+        "TOP": "상단",
+        "CHARACTER_CONFIG": "캐릭터 설정",
+        "SAVE": "저장",
+        "CANCEL": "취소"
+    }
+}

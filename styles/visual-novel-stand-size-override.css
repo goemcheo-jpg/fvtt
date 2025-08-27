@@ -1,0 +1,18 @@
+/* 원하는 크기로만 바꾸면 됩니다 */
+:root {
+  --vn-stand-max-h: 300px;  /* 높이 한도 (기본 400px에서 축소) */
+  --vn-stand-max-w: 190px;  /* 너비 한도 (기본 250px에서 축소) */
+}
+
+/* 스탠딩 이미지 크기 오버라이드 */
+.vn-standing-image img {
+  max-height: var(--vn-stand-max-h) !important;
+  max-width:  var(--vn-stand-max-w) !important;
+  width: auto !important;
+  height: auto !important;
+  transform-origin: bottom center;
+}
+
+/* 번외: 스케일 방식이 더 좋다면 아래 한 줄만 추가(선택)
+.vn-standing-image img { transform: scale(0.9); }
+*/
