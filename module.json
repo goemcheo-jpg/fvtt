@@ -1,0 +1,20 @@
+{
+  "id": "visual-novel-chat",
+  "type": "module",
+  "title": "Visual Novel Chat",
+  "description": "Foundry VTT에서 비주얼노벨 스타일의 채팅창과 스탠딩 이미지를 제공하는 모듈",
+  "version": "1.0.0",
+  "compatibility": {
+    "minimum": "11",
+    "verified": "12"
+  },
+  "authors": [
+    { "name": "goemcheo-jpg" }
+  ],
+  "esmodules": [ "scripts/main.js" ],
+  "styles": [ "styles/visual-novel.css" ],
+  "manifest": "https://raw.githubusercontent.com/goemcheo-jpg/fvtt/main/module.json",
+  "download": "https://github.com/goemcheo-jpg/fvtt/releases/download/v1.0.0/visual-novel-chat-1.0.0.zip",
+  "url": "https://github.com/goemcheo-jpg/fvtt",
+  "license": "MIT"
+}
