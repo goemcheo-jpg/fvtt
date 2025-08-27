@@ -138,9 +138,9 @@ function registerChatCommands() {
             if (!game.settings.get('visual-novel-chat', 'enableVNMode')) {
                 game.settings.set('visual-novel-chat', 'enableVNMode', true);
                 game.visualNovelChat.show();
-                setTimeout(() => game.standingManager.showStanding(characterRef, emotion), 400);
+                setTimeout(() => game.standingManager.showStanding(characterRef, emotion, null, { fromUserAction: true }), 400);
             } else {
-                game.standingManager.showStanding(characterRef, emotion);
+                game.standingManager.showStanding(characterRef, emotion, null, { fromUserAction: true });
             }
             return false;
         }

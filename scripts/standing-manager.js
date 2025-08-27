@@ -17,6 +17,11 @@ export class StandingManager {
     }
 
     // ===== 동기화 유틸 =====
+    _debug(message, ...args) {
+        if (game.settings.get('visual-novel-chat', 'debugMode')) {
+            console.log('[StandingManager]', message, ...args);
+        }
+    }
     _syncEnabled() {
         return !!game.settings.get('visual-novel-chat', 'syncRealtimeStanding');
     }
@@ -43,7 +48,10 @@ export class StandingManager {
 
         switch (data?.type) {
             case 'show':
-                this.showStanding(data.actorId, data.emotion, data.position ?? null, { broadcast: false });
+                this.showStanding(data.actorId, data.emotion, data.position ?? null, { broadcast: false, fromSocket: true });
+                break;
+            case 'emotionUpdate':
+                this.showStanding(data.actorId, data.emotion, null, { broadcast: false, fromSocket: true, forceUpdate: true });
                 break;
             case 'hide':
                 this.hideStanding(data.actorId, { broadcast: false });
@@ -101,35 +109,115 @@ export class StandingManager {
 
     // ===== 표시/변경 =====
     async showStanding(characterRef, emotion, position = null, options = {}) {
-        const { broadcast = true } = options;
+        const { 
+            broadcast = true, 
+            fromSocket = false, 
+            forceUpdate = false, 
+            fromUserAction = false 
+        } = options;
+
+        this._debug('showStanding called', { characterRef, emotion, position, options });
 
         let character = null, characterData = null;
 
+        // Try to find character by ID first
         if (this.characterData[characterRef]) {
-            character = characterRef; characterData = this.characterData[characterRef];
+            character = characterRef; 
+            characterData = this.characterData[characterRef];
         } else {
-            const foundActor = game.actors.find(actor =>
-                actor.name.toLowerCase().includes(characterRef.toLowerCase()) ||
-                characterRef.toLowerCase().includes(actor.name.toLowerCase())
+            // Search by name
+            const foundActor = game.actors?.find?.(actor =>
+                actor.name?.toLowerCase()?.includes?.(characterRef.toLowerCase()) ||
+                characterRef.toLowerCase().includes(actor.name?.toLowerCase() || '')
             );
             if (foundActor && this.characterData[foundActor.id]) {
-                character = foundActor.id; characterData = this.characterData[foundActor.id];
+                character = foundActor.id; 
+                characterData = this.characterData[foundActor.id];
             }
         }
-        if (!characterData) return;
 
+        // Synthesize characterData from game.actors when missing for network/sync/user actions
+        if (!characterData && (fromSocket || forceUpdate || fromUserAction)) {
+            this._debug('Synthesizing characterData for missing character', characterRef);
+            
+            let actor = null;
+            if (typeof characterRef === 'string' && characterRef.length > 10) {
+                // Likely an actor ID
+                actor = game.actors?.get?.(characterRef);
+            }
+            
+            if (!actor) {
+                // Search by name
+                actor = game.actors?.find?.(a => 
+                    a.name?.toLowerCase()?.includes?.(characterRef.toLowerCase()) ||
+                    characterRef.toLowerCase().includes(a.name?.toLowerCase() || '')
+                );
+            }
+
+            if (actor) {
+                character = actor.id;
+                characterData = {
+                    name: actor.name || characterRef,
+                    // Use 'default' as the emotion key for actor fallback
+                    default: actor.prototypeToken?.texture?.src || actor.img || null
+                };
+                
+                // Add to characterData cache to prevent repeated synthesis
+                this.characterData[character] = characterData;
+                this._debug('Synthesized characterData', { character, characterData });
+            }
+        }
+
+        if (!characterData) {
+            this._debug('No characterData found, cannot show standing', characterRef);
+            return;
+        }
+
+        // Resolve emotion with fallbacks
         let cleanEmotion;
         if (!emotion) {
-            const list = Object.keys(characterData).filter(k => k !== 'name');
-            if (list.length === 0) { this.createEmotionToggle(character); this.updateQuickDock(); return; }
-            cleanEmotion = list[0];
-        } else cleanEmotion = emotion.toLowerCase().replace(/\s+/g, '');
+            const availableEmotions = Object.keys(characterData).filter(k => k !== 'name');
+            if (availableEmotions.length === 0) { 
+                this.createEmotionToggle(character); 
+                this.updateQuickDock(); 
+                return; 
+            }
+            cleanEmotion = availableEmotions[0];
+        } else {
+            cleanEmotion = emotion.toLowerCase().replace(/\s+/g, '');
+        }
 
+        // Resolve emotion image path with fallbacks
         let imagePath = characterData[cleanEmotion];
         if (!imagePath) {
-            const list = Object.keys(characterData).filter(k => k !== 'name');
-            if (list.length > 0) { imagePath = characterData[list[0]]; cleanEmotion = list[0]; }
-            else { this.createEmotionToggle(character); this.updateQuickDock(); return; }
+            this._debug('Emotion not found, trying fallbacks', { cleanEmotion, characterData });
+            
+            // Try 'default' emotion key
+            if (characterData.default) {
+                imagePath = characterData.default;
+                cleanEmotion = 'default';
+            } else {
+                // Try any available emotion key
+                const availableEmotions = Object.keys(characterData).filter(k => k !== 'name');
+                if (availableEmotions.length > 0) {
+                    imagePath = characterData[availableEmotions[0]];
+                    cleanEmotion = availableEmotions[0];
+                } else {
+                    // Final fallback to actor image
+                    const actor = game.actors?.get?.(character);
+                    imagePath = actor?.prototypeToken?.texture?.src || actor?.img;
+                    if (imagePath) {
+                        cleanEmotion = 'default';
+                        // Cache this fallback
+                        characterData.default = imagePath;
+                    } else {
+                        this._debug('No image found for character', character);
+                        this.createEmotionToggle(character); 
+                        this.updateQuickDock(); 
+                        return;
+                    }
+                }
+            }
         }
 
         // VN 창/스탠딩 레이어가 없다면 자동으로 띄움(도크만으로도 구동)
@@ -139,26 +227,63 @@ export class StandingManager {
         }
 
         const standingContainer = game.visualNovelChat?.getStandingContainer?.();
-        if (!standingContainer || !standingContainer.length) return;
-
-        if (this.activeStandings.has(character)) {
-            const existing = this.activeStandings.get(character);
-            const img = existing.find('img');
-            img.attr('src', imagePath);
-            img.attr('alt', `${characterData.name || character} ${cleanEmotion}`);
-            existing.attr('data-emotion', cleanEmotion);
-            img[0].src = imagePath;
-
-            this.lastUsedCharacters.delete(character);
-            this.lastUsedCharacters.add(character);
-            this.updateEmotionToggle(character, cleanEmotion);
-            this.updateQuickDock();
-
-            if (broadcast) this._emit({ type: 'show', actorId: character, emotion: cleanEmotion });
+        if (!standingContainer || !standingContainer.length) {
+            this._debug('No standing container found');
             return;
         }
 
-        // (현 버전) 최대치 초과 시 가장 오래된 것부터 제거
+        // Check if standing already exists
+        const standingExists = this.activeStandings.has(character);
+        const currentEmotion = standingExists ? this.activeStandings.get(character)?.attr?.('data-emotion') : null;
+        const shouldUpdate = forceUpdate || !standingExists || currentEmotion !== cleanEmotion;
+
+        if (standingExists && shouldUpdate) {
+            // Update existing standing
+            const existing = this.activeStandings.get(character);
+            const img = existing?.find?.('img');
+            
+            if (img?.length) {
+                const escapedName = (typeof Handlebars !== 'undefined' && Handlebars.Utils?.escapeExpression) 
+                    ? Handlebars.Utils.escapeExpression(characterData.name || character)
+                    : (characterData.name || character);
+                const escapedEmotion = (typeof Handlebars !== 'undefined' && Handlebars.Utils?.escapeExpression)
+                    ? Handlebars.Utils.escapeExpression(cleanEmotion)
+                    : cleanEmotion;
+
+                img.attr('src', imagePath);
+                img.attr('alt', `${escapedName} ${escapedEmotion}`);
+                existing.attr('data-emotion', cleanEmotion);
+                img[0].src = imagePath;
+
+                this.lastUsedCharacters.delete(character);
+                this.lastUsedCharacters.add(character);
+                this.updateEmotionToggle(character, cleanEmotion);
+                this.updateQuickDock();
+
+                this._debug('Updated existing standing', { character, cleanEmotion });
+
+                // Emit based on conditions
+                if (broadcast && !fromSocket && this._authorityAllowsSend()) {
+                    if (fromUserAction) {
+                        // Immediate emit for user actions
+                        this._emit({ type: 'emotionUpdate', actorId: character, emotion: cleanEmotion });
+                    } else {
+                        // Queue for typing/fromChat as existing behavior
+                        this._emit({ type: 'show', actorId: character, emotion: cleanEmotion });
+                    }
+                }
+                return;
+            }
+        } else if (standingExists && !shouldUpdate) {
+            // Standing exists with same emotion, but force broadcast if user action
+            if (fromUserAction && broadcast && !fromSocket && this._authorityAllowsSend()) {
+                this._debug('Forcing emotion update broadcast for re-selection', { character, cleanEmotion });
+                this._emit({ type: 'emotionUpdate', actorId: character, emotion: cleanEmotion });
+            }
+            return;
+        }
+
+        // Create new standing
         if (this.activeStandings.size >= this.maxStandings) {
             const firstCharacter = this.activeStandings.keys().next().value;
             this.hideStanding(firstCharacter, { broadcast });
@@ -166,11 +291,26 @@ export class StandingManager {
 
         if (position === null) position = this.activeStandings.size;
 
+        // Use escaping for DOM creation
+        const escapedCharacter = (typeof Handlebars !== 'undefined' && Handlebars.Utils?.escapeExpression)
+            ? Handlebars.Utils.escapeExpression(character)
+            : character;
+        const escapedEmotion = (typeof Handlebars !== 'undefined' && Handlebars.Utils?.escapeExpression)
+            ? Handlebars.Utils.escapeExpression(cleanEmotion)
+            : cleanEmotion;
+        const escapedName = (typeof Handlebars !== 'undefined' && Handlebars.Utils?.escapeExpression)
+            ? Handlebars.Utils.escapeExpression(characterData.name || character)
+            : (characterData.name || character);
+        const escapedImagePath = (typeof Handlebars !== 'undefined' && Handlebars.Utils?.escapeExpression)
+            ? Handlebars.Utils.escapeExpression(imagePath)
+            : imagePath;
+
         const standingEl = $(`
-            <div class="vn-standing-image" data-character="${character}" data-emotion="${cleanEmotion}" data-position="${position}">
-                <img src="${imagePath}" alt="${characterData.name || character} ${cleanEmotion}">
+            <div class="vn-standing-image" data-character="${escapedCharacter}" data-emotion="${escapedEmotion}" data-position="${position}">
+                <img src="${escapedImagePath}" alt="${escapedName} ${escapedEmotion}">
             </div>
         `);
+
         standingContainer.append(standingEl);
         this.activeStandings.set(character, standingEl);
 
@@ -182,7 +322,11 @@ export class StandingManager {
         this.createEmotionToggle(character);
         this.updateQuickDock();
 
-        if (broadcast) this._emit({ type: 'show', actorId: character, emotion: cleanEmotion, position });
+        this._debug('Created new standing', { character, cleanEmotion, position });
+
+        if (broadcast && !fromSocket && this._authorityAllowsSend()) {
+            this._emit({ type: 'show', actorId: character, emotion: cleanEmotion, position });
+        }
     }
 
     createEmotionToggle(characterId) {
@@ -251,7 +395,7 @@ export class StandingManager {
 
     attachEmotionToggleEvents(characterId) {
         $(`.emotion-btn[data-character="${characterId}"]`).off('click contextmenu').on({
-            click: (e) => this.showStanding(characterId, $(e.target).data('emotion'), null, { broadcast: true }),
+            click: (e) => this.showStanding(characterId, $(e.target).data('emotion'), null, { broadcast: true, fromUserAction: true }),
             contextmenu: (e) => { e.preventDefault(); this.confirmDeleteEmotion(characterId, $(e.target).data('emotion')); }
         });
         $(`.emotion-manage-btn[data-character="${characterId}"]`).off('click').on('click', () => this.openEmotionManager(characterId));
@@ -274,7 +418,7 @@ export class StandingManager {
             const cur = this.activeStandings.get(characterId).attr('data-emotion');
             if (cur === emotion.toLowerCase().replace(/\s+/g, '')) {
                 const left = this.getAvailableEmotions(characterId);
-                if (left.length > 0) this.showStanding(characterId, left[0], null, { broadcast: true });
+                if (left.length > 0) this.showStanding(characterId, left[0], null, { broadcast: true, fromUserAction: true });
                 else {
                     this.hideStanding(characterId, { broadcast: true });
                     setTimeout(() => this.createEmotionToggle(characterId), 80);
@@ -345,7 +489,7 @@ export class StandingManager {
                     if (ok) {
                         dialog.close();
                         this.openEmotionManager(characterId);
-                        this.showStanding(characterId, emName, null, { broadcast: true });
+                        this.showStanding(characterId, emName, null, { broadcast: true, fromUserAction: true });
                         this.createEmotionToggle(characterId);
                         this.updateQuickDock();
                     }
@@ -517,7 +661,7 @@ export class StandingManager {
                 else {
                     const last = this.activeStandings.get(id)?.attr('data-emotion') ||
                                  this.getAvailableEmotions(id)[0] || 'default';
-                    this.showStanding(id, last || 'default', null, { broadcast: true });
+                    this.showStanding(id, last || 'default', null, { broadcast: true, fromUserAction: true });
                 }
             })
             .on('contextmenu', (e) => {
@@ -591,7 +735,7 @@ export class StandingManager {
         $pop.find('.vn-qp-hide').on('click', () => { this.hideStanding(characterId, { broadcast: true }); $('.vn-quick-popover').remove(); });
         $pop.find('.vn-qp-btn').on('click', (e) => {
             const em = $(e.currentTarget).data('emotion');
-            this.showStanding(characterId, em, null, { broadcast: true });
+            this.showStanding(characterId, em, null, { broadcast: true, fromUserAction: true });
             $('.vn-quick-popover').remove();
         });
         return $pop;
